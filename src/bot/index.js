@@ -1,36 +1,32 @@
 require('dotenv').config();
 const { Telegraf, session, Markup } = require('telegraf');
 const db = require('../db');
-const { PLANS, isSubscriptionActive } = require('../services/subscriptions');
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
+const ADMIN_IDS = (process.env.ADMIN_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
 
-// ─── Session middleware ───────────────────────────────────────────────────────
+// ─── Session ──────────────────────────────────────────────────────────────────
 bot.use(session());
 bot.use((ctx, next) => {
   if (!ctx.session) ctx.session = {};
   return next();
 });
 
-// ─── User middleware: load/create user from DB ────────────────────────────────
+// ─── User middleware ──────────────────────────────────────────────────────────
 bot.use(async (ctx, next) => {
   if (!ctx.from || ctx.from.is_bot) return next();
-
   ctx.dbUser = await db.getOrCreateUser(ctx.from);
-
   if (ctx.dbUser.is_banned) {
     return ctx.reply('🚫 Ваш аккаунт заблокирован. Обратитесь в поддержку.');
   }
-
   return next();
 });
 
-// ─── Main keyboard ────────────────────────────────────────────────────────────
+// ─── Главное меню ─────────────────────────────────────────────────────────────
 function mainMenu() {
   return Markup.keyboard([
-    ['📋 Доступные задания', '➕ Создать задание'],
-    ['📊 Мои задания', '💎 Подписка'],
-    ['👤 Профиль'],
+    ['🚀 Буст шота'],
+    ['💬 Чат с админом'],
   ]).resize();
 }
 
@@ -38,72 +34,62 @@ function mainMenu() {
 bot.command('start', async (ctx) => {
   const user = ctx.dbUser;
 
-  // Онбординг: если Dribbble профиль ещё не подтверждён
   if (!user.dribbble_url) {
     ctx.session.waitingFor = 'onboarding_dribbble_url';
     return ctx.replyWithMarkdown(
       `🏀 *Добро пожаловать в DribbbleBoost!*\n\n` +
-      `Платформа взаимного продвижения на Dribbble.\n\n` +
-      `Для начала нужно подтвердить ваш профиль Dribbble.\n` +
-      `Пришлите ссылку на ваш профиль:\n\n` +
+      `Здесь дизайнеры помогают друг другу расти на Dribbble.\n\n` +
+      `Для начала пришлите ссылку на ваш профиль:\n` +
       `_Например: https://dribbble.com/username_\n\n` +
-      `⚠️ *Требования к аккаунту:*\n` +
+      `⚠️ *Требования:*\n` +
       `• Минимум 5 работ в портфолио\n` +
-      `• Аккаунт зарегистрирован не менее 3 месяцев назад`,
+      `• Аккаунт создан не менее 3 месяцев назад`,
       Markup.removeKeyboard()
     );
   }
 
-  // Уже онбордингован — показываем меню
-  const plan = PLANS[user.subscription] || PLANS.free;
   await ctx.replyWithMarkdown(
     `🏀 *DribbbleBoost*\n\n` +
-    `💳 Баланс: *${user.credits} кредитов*\n` +
-    `📦 Тариф: ${plan.emoji} *${plan.name}*`,
+    `Привет, ${user.first_name || 'дизайнер'}!\n\n` +
+    `Нажми *Буст шота* — и твою последнюю работу увидят все участники.`,
     mainMenu()
   );
 });
 
-// ─── Profile ──────────────────────────────────────────────────────────────────
-bot.hears('👤 Профиль', async (ctx) => {
-  const user = ctx.dbUser;
-  const plan = PLANS[user.subscription] || PLANS.free;
-  const active = isSubscriptionActive(user);
-
-  let subText = `${plan.emoji} ${plan.name}`;
-  if (user.subscription !== 'free' && user.subscription_expires_at) {
-    const exp = new Date(user.subscription_expires_at).toLocaleDateString('ru-RU');
-    subText += active ? ` _(до ${exp})_` : ` ⚠️ _истёк ${exp}_`;
-  }
-
-  const completions = await db.getCompletionCount(user.id);
-  const count = completions;
-
-  await ctx.replyWithMarkdown(
-    `👤 *Ваш профиль*\n\n` +
-    `👋 ${user.first_name || 'Пользователь'}` +
-    (user.username ? ` (@${user.username})` : '') + `\n` +
-    `🆔 ID: \`${user.id}\`\n` +
-    `💳 Баланс: *${user.credits} кредитов*\n` +
-    `📦 Тариф: ${subText}\n` +
-    `✅ Выполнено заданий: *${count}*\n` +
-    (user.dribbble_url
-      ? `🏀 Dribbble: ${user.dribbble_url}\n`
-      : `🏀 Dribbble: _не указан_\n`) +
-    `\n_Зарегистрирован: ${new Date(user.created_at).toLocaleDateString('ru-RU')}_`,
-    Markup.inlineKeyboard([
-      [Markup.button.callback('🔗 Изменить Dribbble URL', 'set_dribbble_url')],
-    ])
-  );
-});
-
+// ─── Профиль (смена URL) ──────────────────────────────────────────────────────
 bot.action('set_dribbble_url', async (ctx) => {
   await ctx.answerCbQuery();
   ctx.session.waitingFor = 'dribbble_url';
   await ctx.reply(
-    '🔗 Отправьте ссылку на ваш профиль Dribbble:\n\n_Например: https://dribbble.com/username_',
-    { parse_mode: 'Markdown', reply_markup: { remove_keyboard: true } }
+    '🔗 Отправьте новую ссылку на профиль Dribbble:',
+    { reply_markup: { remove_keyboard: true } }
   );
+});
+
+// ─── Чат с админом ───────────────────────────────────────────────────────────
+bot.hears('💬 Чат с админом', async (ctx) => {
+  const user = ctx.dbUser;
+  ctx.session.waitingFor = 'admin_message';
+  await ctx.replyWithMarkdown(
+    `💬 *Напишите сообщение для администратора*\n\n` +
+    `Опишите ваш вопрос или проблему — мы ответим как можно скорее.`,
+    Markup.keyboard([['❌ Отмена']]).resize()
+  );
+});
+
+// ─── Ответ админа пользователю (/reply ID текст) ─────────────────────────────
+bot.command('reply', async (ctx) => {
+  if (!ADMIN_IDS.includes(String(ctx.from.id))) return;
+  const parts = ctx.message.text.split(' ');
+  const targetId = parts[1];
+  const text = parts.slice(2).join(' ');
+  if (!targetId || !text) return ctx.reply('Формат: /reply USER_ID текст');
+  try {
+    await bot.telegram.sendMessage(targetId, `📩 *Ответ от администратора:*\n\n${text}`, { parse_mode: 'Markdown' });
+    await ctx.reply('✅ Сообщение отправлено');
+  } catch (e) {
+    await ctx.reply('❌ Не удалось отправить: ' + e.message);
+  }
 });
 
 module.exports = { bot, mainMenu };
