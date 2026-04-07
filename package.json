@@ -5,6 +5,7 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
+    "start:admin": "node admin/server.js",
     "dev": "nodemon src/index.js",
     "migrate": "node src/db/migrate.js",
     "admin": "node admin/server.js"
