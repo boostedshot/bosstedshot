@@ -256,6 +256,88 @@ const db = {
     });
   },
 
+  // Статистика для дашборда
+  async getDashboardStats() {
+    const [totalUsers, totalBoosts, todayBoosts, neverBoosted] = await Promise.all([
+      count('/users', { is_banned: 'eq.false' }),
+      count('/boosts'),
+      count('/boosts', { date: `eq.${new Date().toISOString().slice(0,10)}` }),
+      // Пользователи без ни одного буста
+      get('/users', { select: 'id', dribbble_url: 'not.is.null', is_banned: 'eq.false' }).then(async users => {
+        const boostedIds = await get('/boosts', { select: 'user_id' });
+        const boostedSet = new Set(boostedIds.map(b => b.user_id));
+        return users.filter(u => !boostedSet.has(u.id)).length;
+      }),
+    ]);
+    return { totalUsers, totalBoosts, todayBoosts, neverBoosted };
+  },
+
+  // Все бусты с инфо о пользователе
+  async getAllBoosts(limit = 100, offset = 0) {
+    const boosts = await get('/boosts', {
+      select: '*,users(id,username,first_name,dribbble_url)',
+      order: 'created_at.desc',
+      limit,
+      offset,
+    });
+    return boosts.map(b => ({
+      ...b,
+      username: b.users?.username,
+      first_name: b.users?.first_name,
+      dribbble_url: b.users?.dribbble_url,
+    }));
+  },
+
+  // Лидерборд — кто чаще/реже делает бусты
+  async getBoostLeaderboard(order = 'desc') {
+    const users = await get('/users', {
+      select: 'id,username,first_name,dribbble_url,created_at',
+      dribbble_url: 'not.is.null',
+      is_banned: 'eq.false',
+    });
+    const boosts = await get('/boosts', { select: 'user_id,date' });
+
+    const countMap = {};
+    const lastMap = {};
+    boosts.forEach(b => {
+      countMap[b.user_id] = (countMap[b.user_id] || 0) + 1;
+      if (!lastMap[b.user_id] || b.date > lastMap[b.user_id]) lastMap[b.user_id] = b.date;
+    });
+
+    const result = users.map(u => ({
+      ...u,
+      boost_count: countMap[u.id] || 0,
+      last_boost: lastMap[u.id] || null,
+    }));
+
+    result.sort((a, b) => order === 'desc'
+      ? b.boost_count - a.boost_count
+      : a.boost_count - b.boost_count
+    );
+    return result;
+  },
+
+  // Пользователи которые НЕ сделали буст за последние N дней
+  async getUsersWhoDidntBoost(days = 7) {
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+    const sinceStr = since.toISOString().slice(0, 10);
+
+    const users = await get('/users', {
+      select: 'id,username,first_name,dribbble_url,created_at',
+      dribbble_url: 'not.is.null',
+      is_banned: 'eq.false',
+    });
+
+    const recentBoosts = await get('/boosts', {
+      select: 'user_id',
+      date: `gte.${sinceStr}`,
+    });
+
+    const recentSet = new Set(recentBoosts.map(b => b.user_id));
+    return users.filter(u => !recentSet.has(u.id));
+  },
+
   async getCompletionCount(userId) {
     return count('/task_completions', {
       user_id: `eq.${userId}`,
