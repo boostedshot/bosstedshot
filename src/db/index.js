@@ -262,6 +262,37 @@ const db = {
       status: 'eq.verified',
     });
   },
+
+  // Все верифицированные пользователи кроме заданного
+  async getAllUsersExcept(excludeId) {
+    const rows = await get('/users', {
+      select: 'id,username,first_name',
+      is_banned: 'eq.false',
+      dribbble_url: 'not.is.null',
+    });
+    return (rows || []).filter(u => u.id !== excludeId);
+  },
+
+  // Проверить делал ли пользователь буст сегодня
+  async getTodayBoost(userId) {
+    const today = new Date().toISOString().slice(0, 10);
+    const rows = await get('/boosts', {
+      user_id: `eq.${userId}`,
+      date: `eq.${today}`,
+      select: 'id',
+    });
+    return rows.length > 0 ? rows[0] : null;
+  },
+
+  async createBoost(userId, shotUrl) {
+    const today = new Date().toISOString().slice(0, 10);
+    const rows = await post('/boosts', {
+      user_id: userId,
+      shot_url: shotUrl,
+      date: today,
+    }, { Prefer: 'return=representation' });
+    return Array.isArray(rows) ? rows[0] : rows;
+  },
 };
 
 module.exports = db;
