@@ -105,6 +105,31 @@ async function getShotInfo(shotUrl) {
   }
 }
 
+async function getLatestShot(profileUrl) {
+  try {
+    const username = new URL(profileUrl).pathname.replace(/\//g, '');
+    const rssRes = await axios.get(`https://dribbble.com/${username}/shots.rss`, {
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+      timeout: 10000,
+    });
+    const xml = rssRes.data;
+    // Берём первый <item>
+    const linkMatch = xml.match(/<item>[\s\S]*?<link>(.*?)<\/link>/);
+    const titleMatch = xml.match(/<item>[\s\S]*?<title>(.*?)<\/title>/);
+    const imgMatch = xml.match(/<item>[\s\S]*?<enclosure[^>]+url="([^"]+)"/);
+    if (!linkMatch) return null;
+    return {
+      url: linkMatch[1].trim(),
+      title: titleMatch ? titleMatch[1].replace(/<!\[CDATA\[|\]\]>/g, '').trim() : 'Shot',
+      image: imgMatch ? imgMatch[1] : null,
+      profileUrl,
+      username,
+    };
+  } catch (err) {
+    return null;
+  }
+}
+
 async function verifyDribbbleProfile(profileUrl) {
   try {
     const username = new URL(profileUrl).pathname.replace(/\//g, '');
@@ -191,5 +216,6 @@ module.exports = {
   checkLike,
   checkComment,
   getShotInfo,
+  getLatestShot,
   verifyDribbbleProfile,
 };
