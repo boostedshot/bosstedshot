@@ -396,8 +396,14 @@ app.post('/admin/api/users/:id/unban', requireAuth, async (req, res) => {
   catch (e) { res.json({ ok: false, error: e.message }); }
 });
 app.post('/admin/api/users/:id/delete', requireAuth, async (req, res) => {
-  try { await db.deleteUser(req.params.id); res.json({ ok: true }); }
-  catch (e) { res.json({ ok: false, error: e.message }); }
+  try {
+    await db.deleteUser(req.params.id);
+    res.json({ ok: true });
+  } catch (e) {
+    const detail = e.response?.data || e.message;
+    console.error('Delete user error:', JSON.stringify(detail));
+    res.json({ ok: false, error: JSON.stringify(detail) });
+  }
 });
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
