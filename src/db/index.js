@@ -375,6 +375,15 @@ const db = {
     }, { Prefer: 'return=representation' });
     return Array.isArray(rows) ? rows[0] : rows;
   },
+
+  async deleteUser(userId) {
+    // Delete related records first, then the user
+    await del('/task_completions', { user_id: `eq.${userId}` });
+    await del('/boosts', { user_id: `eq.${userId}` });
+    await del('/subscriptions', { user_id: `eq.${userId}` });
+    await del('/tasks', { creator_id: `eq.${userId}` });
+    await del('/users', { id: `eq.${userId}` });
+  },
 };
 
 module.exports = db;

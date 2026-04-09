@@ -197,10 +197,11 @@ app.get('/admin/users', requireAuth, async (req, res) => {
       <td>${u.is_banned
         ? '<span class="chip chip-red">Banned</span>'
         : '<span class="chip chip-green">Active</span>'}</td>
-      <td>
+      <td style="display:flex;gap:6px;align-items:center">
         ${u.is_banned
           ? `<button onclick="userAction(${u.id},'unban')" class="btn btn-sm btn-green">Unban</button>`
           : `<button onclick="userAction(${u.id},'ban')" class="btn btn-sm btn-red">Ban</button>`}
+        <button onclick="deleteUser(${u.id},'${(u.first_name || u.username || 'this user').replace(/'/g, '')}')" class="btn btn-sm btn-delete">Delete</button>
       </td>
     </tr>
   `).join('');
@@ -234,6 +235,12 @@ app.get('/admin/users', requireAuth, async (req, res) => {
     async function userAction(id, action) {
       if (!confirm('Are you sure?')) return;
       const r = await fetch('/admin/api/users/' + id + '/' + action, { method: 'POST' });
+      const d = await r.json();
+      if (d.ok) location.reload(); else alert('Error: ' + d.error);
+    }
+    async function deleteUser(id, name) {
+      if (!confirm('Delete ' + name + '?\n\nThis will permanently remove the user and all their data. This cannot be undone.')) return;
+      const r = await fetch('/admin/api/users/' + id + '/delete', { method: 'POST' });
       const d = await r.json();
       if (d.ok) location.reload(); else alert('Error: ' + d.error);
     }
@@ -382,6 +389,10 @@ app.post('/admin/api/users/:id/ban', requireAuth, async (req, res) => {
 });
 app.post('/admin/api/users/:id/unban', requireAuth, async (req, res) => {
   try { await db.updateUser(req.params.id, { is_banned: false }); res.json({ ok: true }); }
+  catch (e) { res.json({ ok: false, error: e.message }); }
+});
+app.post('/admin/api/users/:id/delete', requireAuth, async (req, res) => {
+  try { await db.deleteUser(req.params.id); res.json({ ok: true }); }
   catch (e) { res.json({ ok: false, error: e.message }); }
 });
 
@@ -562,6 +573,8 @@ function layout(title, content) {
   .btn-green:hover{background:#bbf7d0}
   .btn-red{background:#fef2f2;color:#ef4444!important}
   .btn-red:hover{background:#fee2e2}
+  .btn-delete{background:#1c1c1e;color:#fff!important}
+  .btn-delete:hover{background:#3a3a3c}
 
   /* Misc */
   .rank{font-weight:700;color:#6366f1;font-size:15px}
