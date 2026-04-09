@@ -201,7 +201,9 @@ app.get('/admin/users', requireAuth, async (req, res) => {
         ${u.is_banned
           ? `<button onclick="userAction(${u.id},'unban')" class="btn btn-sm btn-green">Unban</button>`
           : `<button onclick="userAction(${u.id},'ban')" class="btn btn-sm btn-red">Ban</button>`}
-        <button onclick="deleteUser(${u.id},'${(u.first_name || u.username || 'this user').replace(/'/g, '')}')" class="btn btn-sm btn-delete">Delete</button>
+        <form method="POST" action="/admin/users/${u.id}/delete" style="display:inline" onsubmit="return confirm('Delete this user?\\n\\nAll their data will be permanently removed.')">
+          <button type="submit" class="btn btn-sm btn-delete">Delete</button>
+        </form>
       </td>
     </tr>
   `).join('');
@@ -235,13 +237,6 @@ app.get('/admin/users', requireAuth, async (req, res) => {
     window.userAction = function(id, action) {
       if (!confirm('Are you sure?')) return;
       fetch('/admin/api/users/' + id + '/' + action, { method: 'POST' })
-        .then(function(r) { return r.json(); })
-        .then(function(d) { if (d.ok) location.reload(); else alert('Error: ' + d.error); })
-        .catch(function(e) { alert('Network error: ' + e.message); });
-    };
-    window.deleteUser = function(id, name) {
-      if (!confirm('Delete ' + name + '?\n\nThis will permanently remove the user and all their data. This cannot be undone.')) return;
-      fetch('/admin/api/users/' + id + '/delete', { method: 'POST' })
         .then(function(r) { return r.json(); })
         .then(function(d) { if (d.ok) location.reload(); else alert('Error: ' + d.error); })
         .catch(function(e) { alert('Network error: ' + e.message); });
@@ -394,13 +389,21 @@ app.post('/admin/api/users/:id/unban', requireAuth, async (req, res) => {
   catch (e) { res.json({ ok: false, error: e.message }); }
 });
 app.post('/admin/api/users/:id/delete', requireAuth, async (req, res) => {
-  try {
-    await db.deleteUser(req.params.id);
-    res.json({ ok: true });
-  } catch (e) {
+  try { await db.deleteUser(req.params.id); res.json({ ok: true }); }
+  catch (e) {
     const detail = e.response?.data || e.message;
     console.error('Delete user error:', JSON.stringify(detail));
     res.json({ ok: false, error: JSON.stringify(detail) });
+  }
+});
+app.post('/admin/users/:id/delete', requireAuth, async (req, res) => {
+  try {
+    await db.deleteUser(req.params.id);
+    res.redirect('/admin/users');
+  } catch (e) {
+    const detail = e.response?.data || e.message;
+    console.error('Delete user error:', JSON.stringify(detail));
+    res.redirect('/admin/users?error=' + encodeURIComponent(JSON.stringify(detail)));
   }
 });
 
