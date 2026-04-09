@@ -377,11 +377,28 @@ const db = {
   },
 
   async deleteUser(userId) {
-    // Delete related records first, then the user
+    // 1. Find all tasks created by this user
+    const userTasks = await get('/tasks', { creator_id: `eq.${userId}`, select: 'id' });
+    const taskIds = userTasks.map(t => t.id);
+
+    // 2. Delete completions for this user's tasks (made by other users)
+    if (taskIds.length > 0) {
+      await del('/task_completions', { task_id: `in.(${taskIds.join(',')})` });
+    }
+
+    // 3. Delete completions made by this user
     await del('/task_completions', { user_id: `eq.${userId}` });
+
+    // 4. Delete boosts
     await del('/boosts', { user_id: `eq.${userId}` });
+
+    // 5. Delete subscriptions
     await del('/subscriptions', { user_id: `eq.${userId}` });
+
+    // 6. Delete tasks
     await del('/tasks', { creator_id: `eq.${userId}` });
+
+    // 7. Delete user
     await del('/users', { id: `eq.${userId}` });
   },
 };

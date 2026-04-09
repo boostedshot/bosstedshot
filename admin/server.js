@@ -240,9 +240,13 @@ app.get('/admin/users', requireAuth, async (req, res) => {
     }
     async function deleteUser(id, name) {
       if (!confirm('Delete ' + name + '?\n\nThis will permanently remove the user and all their data. This cannot be undone.')) return;
-      const r = await fetch('/admin/api/users/' + id + '/delete', { method: 'POST' });
-      const d = await r.json();
-      if (d.ok) location.reload(); else alert('Error: ' + d.error);
+      try {
+        const r = await fetch('/admin/api/users/' + id + '/delete', { method: 'POST' });
+        const d = await r.json();
+        if (d.ok) { location.reload(); } else { alert('Error: ' + d.error); }
+      } catch(e) {
+        alert('Network error: ' + e.message);
+      }
     }
     </script>
   `));
