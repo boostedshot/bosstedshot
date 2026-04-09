@@ -232,22 +232,20 @@ app.get('/admin/users', requireAuth, async (req, res) => {
       </div>
     </div>
     <script>
-    async function userAction(id, action) {
+    window.userAction = function(id, action) {
       if (!confirm('Are you sure?')) return;
-      const r = await fetch('/admin/api/users/' + id + '/' + action, { method: 'POST' });
-      const d = await r.json();
-      if (d.ok) location.reload(); else alert('Error: ' + d.error);
-    }
-    async function deleteUser(id, name) {
+      fetch('/admin/api/users/' + id + '/' + action, { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function(d) { if (d.ok) location.reload(); else alert('Error: ' + d.error); })
+        .catch(function(e) { alert('Network error: ' + e.message); });
+    };
+    window.deleteUser = function(id, name) {
       if (!confirm('Delete ' + name + '?\n\nThis will permanently remove the user and all their data. This cannot be undone.')) return;
-      try {
-        const r = await fetch('/admin/api/users/' + id + '/delete', { method: 'POST' });
-        const d = await r.json();
-        if (d.ok) { location.reload(); } else { alert('Error: ' + d.error); }
-      } catch(e) {
-        alert('Network error: ' + e.message);
-      }
-    }
+      fetch('/admin/api/users/' + id + '/delete', { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function(d) { if (d.ok) location.reload(); else alert('Error: ' + d.error); })
+        .catch(function(e) { alert('Network error: ' + e.message); });
+    };
     </script>
   `));
 });
