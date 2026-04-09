@@ -1,48 +1,47 @@
 const { Markup } = require('telegraf');
 const db = require('../db');
+const { deleteMsg, sendStatus, mainMenu } = require('./index');
 
 async function handleBoost(ctx) {
   const user = ctx.dbUser;
 
-  // Проверяем лимит — 1 буст в день
+  await deleteMsg(ctx, ctx.message.message_id);
+  await deleteMsg(ctx, ctx.session.statusMsgId);
+
   const todayBoost = await db.getTodayBoost(user.id);
   if (todayBoost) {
-    return ctx.replyWithMarkdown(
-      `⏳ *Вы уже сделали буст сегодня*\n\nБуст доступен 1 раз в день. Приходите завтра!`
-    );
+    return sendStatus(ctx, '⏳ You already boosted today. Come back tomorrow!');
   }
 
-  await ctx.replyWithMarkdown(
-    `🚀 *Разослать буст?*\n\n` +
-    `Все пользователи получат ссылку на ваш профиль:\n${user.dribbble_url}`,
-    Markup.inlineKeyboard([
-      [Markup.button.callback('🚀 Да, разослать!', 'confirm_boost')],
-      [Markup.button.callback('❌ Отмена', 'cancel_boost')],
-    ])
+  const msg = await ctx.reply(
+    `🚀 Broadcast your profile to all users?\n\n${user.dribbble_url}`,
+    {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('Publish', 'confirm_boost')],
+        [Markup.button.callback('Cancel', 'cancel_boost')],
+      ]),
+    }
   );
+  ctx.session.statusMsgId = msg.message_id;
 }
 
 async function sendBoostToAll(ctx, bot) {
   const user = ctx.dbUser;
 
-  await ctx.answerCbQuery('🚀 Рассылаем...');
+  await ctx.answerCbQuery('Broadcasting...');
   await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+  await deleteMsg(ctx, ctx.session.statusMsgId);
+  ctx.session.statusMsgId = null;
 
-  // Сохраняем буст
   await db.createBoost(user.id, user.dribbble_url);
 
-  // Получаем всех пользователей
   const users = await db.getAllUsersExcept(user.id);
 
-  const name = user.first_name || user.username || 'Дизайнер';
-  const text =
-    `🏀 *${name}* делится своим профилем на Dribbble!\n\n` +
-    `Откройте профиль и поставьте лайк на последний шот 🙏\n\n` +
-    `⭐ По желанию: добавьте в избранное\n` +
-    `💬 По желанию: напишите комментарий`;
+  const text = `🔔 New publication\n\n[Open publication here](${user.dribbble_url})`;
 
   const keyboard = Markup.inlineKeyboard([
-    [Markup.button.url('🏀 Открыть профиль', user.dribbble_url)],
+    [Markup.button.callback('Put like', `liked_${user.id}`)],
   ]);
 
   let sent = 0;
@@ -56,30 +55,45 @@ async function sendBoostToAll(ctx, bot) {
       });
       sent++;
       await new Promise(r => setTimeout(r, 50));
-    } catch (err) {
+    } catch {
       failed++;
     }
   }
 
-  await ctx.replyWithMarkdown(
-    `✅ *Буст отправлен!*\n\n` +
-    `📨 Получили: *${sent}* пользователей\n` +
-    (failed > 0 ? `⚠️ Не доставлено: ${failed}\n` : '') +
-    `\n_Следующий буст доступен завтра_`
+  const resultMsg = await ctx.reply(
+    `✅ Boost sent!\n\n` +
+    `Delivered: *${sent}* users` +
+    (failed > 0 ? `\nFailed: ${failed}` : '') +
+    `\n\n_Next boost available tomorrow_`,
+    { parse_mode: 'Markdown', ...mainMenu() }
   );
+  ctx.session.statusMsgId = resultMsg.message_id;
 }
 
 function registerBoostHandlers(bot) {
-  bot.hears('🚀 Буст шота', handleBoost);
+  bot.hears('Publish new shot', handleBoost);
 
   bot.action('confirm_boost', async (ctx) => {
     await sendBoostToAll(ctx, bot);
   });
 
   bot.action('cancel_boost', async (ctx) => {
-    await ctx.answerCbQuery('Отменено');
-    await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
-    await ctx.reply('Отменено.');
+    await ctx.answerCbQuery('Cancelled');
+    await deleteMsg(ctx, ctx.session.statusMsgId);
+    ctx.session.statusMsgId = null;
+    await ctx.reply('Cancelled.', mainMenu());
+  });
+
+  // "Put like" button — marks task as done for that user
+  bot.action(/^liked_(\d+)$/, async (ctx) => {
+    try {
+      await ctx.answerCbQuery('');
+      await ctx.editMessageText('✅ Task completed successfully', {
+        parse_mode: 'Markdown',
+      });
+    } catch {
+      await ctx.answerCbQuery('Already marked!');
+    }
   });
 }
 

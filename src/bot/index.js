@@ -16,80 +16,59 @@ bot.use((ctx, next) => {
 bot.use(async (ctx, next) => {
   if (!ctx.from || ctx.from.is_bot) return next();
   ctx.dbUser = await db.getOrCreateUser(ctx.from);
-  if (ctx.dbUser.is_banned) {
-    return ctx.reply('🚫 Ваш аккаунт заблокирован. Обратитесь в поддержку.');
-  }
+  if (ctx.dbUser.is_banned) return ctx.reply('Your account has been banned.');
   return next();
 });
 
-// ─── Главное меню ─────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+async function deleteMsg(ctx, msgId) {
+  if (!msgId) return;
+  try { await ctx.telegram.deleteMessage(ctx.chat.id, msgId); } catch {}
+}
+
+async function sendStatus(ctx, text, extra = {}) {
+  await deleteMsg(ctx, ctx.session.statusMsgId);
+  const msg = await ctx.reply(text, { parse_mode: 'Markdown', ...extra });
+  ctx.session.statusMsgId = msg.message_id;
+  return msg;
+}
+
+// ─── Main menu ────────────────────────────────────────────────────────────────
 function mainMenu() {
-  return Markup.keyboard([
-    ['🚀 Буст шота'],
-    ['💬 Чат с админом'],
-  ]).resize();
+  return Markup.keyboard([['Publish new shot']]).resize();
 }
 
 // ─── /start ───────────────────────────────────────────────────────────────────
 bot.command('start', async (ctx) => {
   const user = ctx.dbUser;
+  await deleteMsg(ctx, ctx.session.statusMsgId);
 
   if (!user.dribbble_url) {
     ctx.session.waitingFor = 'onboarding_dribbble_url';
-    return ctx.replyWithMarkdown(
-      `🏀 *Добро пожаловать в DribbbleBoost!*\n\n` +
-      `Здесь дизайнеры помогают друг другу расти на Dribbble.\n\n` +
-      `Для начала пришлите ссылку на ваш профиль:\n` +
-      `_Например: https://dribbble.com/username_\n\n` +
-      `⚠️ *Требования:*\n` +
-      `• Минимум 5 работ в портфолио\n` +
-      `• Аккаунт создан не менее 3 месяцев назад`,
-      Markup.removeKeyboard()
+    const msg = await ctx.reply(
+      'Hi! 👋 Send me your Dribbble profile link to get started.\n\n_Example: https://dribbble.com/username_\n\n*Requirements:* 5+ shots, account 3+ months old',
+      { parse_mode: 'Markdown', reply_markup: { remove_keyboard: true } }
     );
+    ctx.session.statusMsgId = msg.message_id;
+    return;
   }
 
-  await ctx.replyWithMarkdown(
-    `🏀 *DribbbleBoost*\n\n` +
-    `Привет, ${user.first_name || 'дизайнер'}!\n\n` +
-    `Нажми *Буст шота* — и твою последнюю работу увидят все участники.`,
-    mainMenu()
-  );
+  await sendStatus(ctx, 'Welcome back! 🏀 Ready to boost your shot?', mainMenu());
 });
 
-// ─── Профиль (смена URL) ──────────────────────────────────────────────────────
-bot.action('set_dribbble_url', async (ctx) => {
-  await ctx.answerCbQuery();
-  ctx.session.waitingFor = 'dribbble_url';
-  await ctx.reply(
-    '🔗 Отправьте новую ссылку на профиль Dribbble:',
-    { reply_markup: { remove_keyboard: true } }
-  );
-});
-
-// ─── Чат с админом ───────────────────────────────────────────────────────────
-bot.hears('💬 Чат с админом', async (ctx) => {
-  const user = ctx.dbUser;
-  ctx.session.waitingFor = 'admin_message';
-  await ctx.replyWithMarkdown(
-    `💬 *Напишите сообщение для администратора*\n\n` +
-    `Опишите ваш вопрос или проблему — мы ответим как можно скорее.`,
-    Markup.keyboard([['❌ Отмена']]).resize()
-  );
-});
-
-// ─── Ответ админа пользователю (/reply ID текст) ─────────────────────────────
+// ─── Admin reply ──────────────────────────────────────────────────────────────
 bot.command('reply', async (ctx) => {
   if (!ADMIN_IDS.includes(String(ctx.from.id))) return;
   const parts = ctx.message.text.split(' ');
   const targetId = parts[1];
   const text = parts.slice(2).join(' ');
-  if (!targetId || !text) return ctx.reply('Формат: /reply USER_ID текст');
+  if (!targetId || !text) return ctx.reply('Usage: /reply USER_ID message');
   try {
-    await bot.telegram.sendMessage(targetId, `📩 *Ответ от администратора:*\n\n${text}`, { parse_mode: 'Markdown' });
-    await ctx.reply('✅ Сообщение отправлено');
+    await bot.telegram.sendMessage(targetId, `📩 *Admin:* ${text}`, { parse_mode: 'Markdown' });
+    await ctx.reply('✅ Sent');
   } catch (e) {
-    await ctx.reply('❌ Не удалось отправить: ' + e.message);
+    await ctx.reply('Failed: ' + e.message);
   }
 });
 
-module.exports = { bot, mainMenu };
+module.exports = { bot, mainMenu, sendStatus, deleteMsg };

@@ -1,6 +1,6 @@
-const { Markup } = require('telegraf');
 const db = require('../db');
 const { normalizeDribbbleUrl, isProfileUrl, verifyDribbbleProfile } = require('../services/dribbble');
+const { deleteMsg, sendStatus, mainMenu } = require('./index');
 
 const ADMIN_IDS = (process.env.ADMIN_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
 
@@ -11,95 +11,90 @@ function registerTextHandlers(bot) {
     const text = ctx.message.text;
     const waiting = ctx.session?.waitingFor;
 
-    // ── Отмена ────────────────────────────────────────────────────────
-    if (text === '❌ Отмена') {
+    // ── Cancel ────────────────────────────────────────────────────────
+    if (text === 'Cancel') {
+      await deleteMsg(ctx, ctx.message.message_id);
       ctx.session.waitingFor = null;
-      ctx.session.pendingBoostShot = null;
-      const { mainMenu } = require('./index');
-      return ctx.reply('Отменено.', mainMenu());
+      return sendStatus(ctx, 'Cancelled.', mainMenu());
     }
 
     if (!waiting) return next();
 
-    // ── Онбординг ─────────────────────────────────────────────────────
+    // Delete user's input message to keep chat clean
+    await deleteMsg(ctx, ctx.message.message_id);
+
+    // ── Onboarding: Dribbble URL ──────────────────────────────────────
     if (waiting === 'onboarding_dribbble_url') {
       const url = normalizeDribbbleUrl(text.trim());
       if (!url || !isProfileUrl(url)) {
-        return ctx.reply('❌ Нужна ссылка на профиль: https://dribbble.com/username');
+        return sendStatus(ctx, '❌ Please send a valid profile link: https://dribbble.com/username');
       }
 
-      await ctx.reply('🔍 Проверяю ваш профиль... Подождите ~10 секунд.');
+      await sendStatus(ctx, '🔍 Checking your profile...');
       const result = await verifyDribbbleProfile(url);
 
       if (!result.valid) {
-        return ctx.replyWithMarkdown(
-          `❌ *Профиль не прошёл проверку*\n\n_${result.reason}_\n\n` +
-          `Убедитесь что:\n• Минимум 5 работ в портфолио\n• Аккаунт создан 3+ месяца назад\n• Профиль публичный`
+        return sendStatus(
+          ctx,
+          `❌ Profile check failed\n\n_${result.reason}_\n\nRequirements:\n• 5+ shots in portfolio\n• Account 3+ months old\n• Public profile`,
+          { parse_mode: 'Markdown' }
         );
       }
 
       await db.updateUser(user.id, { dribbble_url: url });
       ctx.session.waitingFor = null;
 
-      const { mainMenu } = require('./index');
-      return ctx.replyWithMarkdown(
-        `✅ *Профиль подтверждён!*\n\n` +
-        `🏀 ${url}\n` +
-        (result.shotCount ? `🎨 Работ найдено: ${result.shotCount}\n\n` : '\n') +
-        `Добро пожаловать! Теперь можешь делать буст своих шотов.`,
-        mainMenu()
+      return sendStatus(
+        ctx,
+        `✅ Profile verified!\n\n${url}` +
+        (result.shotCount ? `\n_${result.shotCount} shots found_` : '') +
+        `\n\nWelcome! Use *Publish new shot* to boost your profile.`,
+        { parse_mode: 'Markdown', ...mainMenu() }
       );
     }
 
-    // ── Смена Dribbble URL ────────────────────────────────────────────
+    // ── Change Dribbble URL ───────────────────────────────────────────
     if (waiting === 'dribbble_url') {
       const url = normalizeDribbbleUrl(text.trim());
       if (!url || !isProfileUrl(url)) {
-        return ctx.reply('❌ Нужна ссылка на профиль: https://dribbble.com/username');
+        return sendStatus(ctx, '❌ Please send a valid profile link: https://dribbble.com/username');
       }
 
-      await ctx.reply('🔍 Проверяю профиль...');
+      await sendStatus(ctx, '🔍 Checking profile...');
       const result = await verifyDribbbleProfile(url);
 
       if (!result.valid) {
-        return ctx.replyWithMarkdown(`❌ *Профиль не прошёл проверку*\n\n_${result.reason}_`);
+        return sendStatus(ctx, `❌ Profile check failed\n\n_${result.reason}_`, { parse_mode: 'Markdown' });
       }
 
       await db.updateUser(user.id, { dribbble_url: url });
       ctx.session.waitingFor = null;
 
-      const { mainMenu } = require('./index');
-      return ctx.replyWithMarkdown(`✅ Dribbble профиль обновлён!\n🏀 ${url}`, mainMenu());
+      return sendStatus(ctx, `✅ Dribbble profile updated!\n${url}`, mainMenu());
     }
 
-    // ── Сообщение админу ─────────────────────────────────────────────
+    // ── Message to admin ──────────────────────────────────────────────
     if (waiting === 'admin_message') {
       ctx.session.waitingFor = null;
 
-      // Форвардим админам
       const userInfo = `👤 @${user.username || '—'} (${user.first_name || ''}) ID: \`${user.id}\``;
-      const adminMsg = `📩 *Сообщение от пользователя*\n\n${userInfo}\n\n_${text}_\n\nОтветить: /reply ${user.id} текст`;
+      const adminMsg = `📩 *Message from user*\n\n${userInfo}\n\n_${text}_\n\nReply: /reply ${user.id} your text`;
 
       let delivered = false;
       for (const adminId of ADMIN_IDS) {
         try {
           await bot.telegram.sendMessage(adminId, adminMsg, { parse_mode: 'Markdown' });
           delivered = true;
-        } catch (e) {}
+        } catch {}
       }
 
-      const { mainMenu } = require('./index');
-      if (delivered) {
-        return ctx.replyWithMarkdown(
-          `✅ *Сообщение отправлено!*\n\nМы ответим вам в ближайшее время.`,
-          mainMenu()
-        );
-      } else {
-        return ctx.replyWithMarkdown(
-          `⚠️ Сообщение принято, но администратор временно недоступен.`,
-          mainMenu()
-        );
-      }
+      return sendStatus(
+        ctx,
+        delivered
+          ? '✅ Message sent! We will reply soon.'
+          : '⚠️ Message received, but admin is unavailable.',
+        mainMenu()
+      );
     }
 
     return next();
